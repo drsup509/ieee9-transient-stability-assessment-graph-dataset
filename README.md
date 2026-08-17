@@ -112,7 +112,7 @@ See `INSTRUCTIONS_IEEE_DataPort.txt` for the complete field-by-field reference.
 
 ## License and citation
 
-License: _[add license here, e.g. CC BY 4.0]_
+License: _[MIT License]_
 
 ```
 Hussein Suprême, Martin de Montigny, Arnaud Zinflou, "IEEE 9-Bus Transient-Stability Dataset", IEEE DataPort, 2026.
