@@ -1,0 +1,268 @@
+================================================================================
+ IEEE 9-BUS TRANSIENT-STABILITY DATASET
+ How to read, access, and extract the data
+================================================================================
+
+File in this record:   case_IEEE9BusSystem_dataset.mat
+Number of scenarios:   20,000
+Power system:          IEEE 9-bus (3 generators, 9 buses, 9 branches)
+Simulation window:     181 time steps per scenario
+
+This document explains the file format, the complete internal structure, the
+meaning and units of every element, how to extract data in MATLAB and Python,
+and the important caveats you must know before using the labels. Two helper
+scripts are provided alongside this file:
+
+  * convert_mat_to_hdf5.py  - export a clean, flat, portable HDF5 file
+  * explore_dataset.py       - print a summary / plot a single scenario
+
+--------------------------------------------------------------------------------
+1. FILE FORMAT
+--------------------------------------------------------------------------------
+The dataset is a single MATLAB file saved in the MATLAB v7.3 format. The v7.3
+format IS an HDF5 container, so the file can be opened WITHOUT MATLAB using any
+HDF5 library (Python h5py, h5py-based tools, C/Fortran HDF5, Julia, R rhdf5,
+HDFView, etc.).
+
+Three caveats follow directly from the way MATLAB writes HDF5:
+
+  (a) Every numeric scalar is stored as a 1x1 matrix.
+  (b) The 20,000 scenarios are stored as an (N x 1) array of HDF5 OBJECT
+      REFERENCES; each reference points to one MATLAB struct. You must
+      dereference to reach a scenario's fields.
+  (c) Text fields (fault type, label text, timestamps, generator names) are
+      stored as MATLAB MCOS objects inside the "#subsystem#" group. These are
+      NOT portably readable outside MATLAB. Every text field has a NUMERIC
+      equivalent in the file, so no information needed for analysis is lost
+      (see Section 7).
+
+--------------------------------------------------------------------------------
+2. OPENING THE FILE
+--------------------------------------------------------------------------------
+MATLAB (native, decodes text fields too):
+    S = load('case_IEEE9BusSystem_dataset.mat');
+    S.dataset.metadata
+    sample = S.dataset.samples{1};      % first scenario struct
+    sample.transient.tsi
+
+Python (h5py):
+    import h5py, numpy as np
+    f = h5py.File('case_IEEE9BusSystem_dataset.mat', 'r')
+    samples = f['dataset/samples']       # shape (20000, 1), object references
+    smp = f[samples[0, 0]]               # dereference scenario 0
+    tsi = float(np.asarray(smp['transient']['tsi']).flatten()[0])
+
+Recommended: run convert_mat_to_hdf5.py once to get a flat file where every
+scalar is an (N,) array and trajectories are stacked (N, n_gen, n_time). That
+file is far easier to load in Python, pandas, xarray, Julia or R.
+
+--------------------------------------------------------------------------------
+3. TOP-LEVEL STRUCTURE
+--------------------------------------------------------------------------------
+/dataset
+    /metadata      dataset-level metadata (see Section 4)
+    /statistics    dataset-level counts (see Section 5)
+    /samples       (20000 x 1) array of object references -> scenario structs
+    /progress      generation bookkeeping
+/#refs#            HDF5 reference targets (internal)
+/#subsystem#       MATLAB MCOS objects: text fields (internal, not portable)
+
+--------------------------------------------------------------------------------
+4. /dataset/metadata
+--------------------------------------------------------------------------------
+    caseName          "case_IEEE9BusSystem"   (uint16 char array)
+    totalSamples      20000
+    numberRequested   20000
+    stableRate        0.4881   (fraction stable)
+    unstableRate      0.5119   (fraction unstable)
+    acceptedRate      0.34365  (fraction passing operating-point screening)
+    borderlineRate    0.65635  (fraction flagged borderline by screening)
+    rejectedRate      0.0
+    creationDate      text (MCOS, MATLAB only)
+    saveTime          text (MCOS, MATLAB only)
+
+--------------------------------------------------------------------------------
+5. /dataset/statistics  (integer counts, sum to 20000)
+--------------------------------------------------------------------------------
+    stable            9762     unstable   10238
+    accepted          6873     borderline 13127
+    rejected          0        total      20000
+    transientFailed   0
+    startTime         text (MCOS)
+
+Note: stable (9762) uses the authoritative 180-degree label (Section 7).
+
+--------------------------------------------------------------------------------
+6. PER-SCENARIO STRUCTURE  (fields of each samples{i})
+--------------------------------------------------------------------------------
+Each scenario is a struct with the following groups. Shapes are given as stored
+by MATLAB (generators = 3, buses = 9, time steps = 181).
+
+transient/   time-domain simulation results
+    delta                 (3, 181)  rotor angle of each generator [RADIANS],
+                                     ABSOLUTE (includes synchronous ramp) - see
+                                     Section 8
+    omega                 (3, 181)  generator speed [per-unit], nominal 1.0
+    time                  (1, 181)  time axis [seconds]
+    tsi                   scalar    transient stability index
+    time2LossSync         scalar    time to loss of synchronism [s], measured
+                                     RELATIVE TO THE FAULT-CLEARING INSTANT
+                                     (negative = synchronism lost before
+                                     clearing) - see Section 8
+    success               scalar    1 if the simulation completed
+    label/                stability label
+        value             scalar    1 = UNSTABLE, 0 = STABLE  (authoritative,
+                                     numeric)
+        threshold         scalar    180  (degrees; the classification threshold)
+        maxSeparation     scalar    peak inter-machine separation [deg]
+        margin            scalar    threshold - maxSeparation [deg]
+        criterion         text (MCOS)
+        status            text (MCOS): "STABLE"/"UNSTABLE"
+    indices/
+        maxAngleSeparationDeg  scalar  peak inter-machine angle separation [deg]
+        maxSpeedDeviation      scalar  peak |omega - 1| [pu]
+        finalAngleSeparationDeg, finalSeparationSlope, timeOfMaxSeparation,
+        numGenerators
+    genNames              text (MCOS)
+    reason                text (MCOS)
+
+fault/       fault definition
+    type                  text (MCOS): fault type
+    line                  scalar    faulted line index (0 for a bus fault)
+    bus                   (2, 1)    from/to bus of the faulted element
+    location              scalar    normalized position along the line [0..1]
+    locationType          text (MCOS)
+    startTime             scalar    fault-on time [s] (= 1.0 for all scenarios)
+    duration              scalar    fault-on duration [s]
+    clearTime             scalar    startTime + duration [s]
+    impedance/R, impedance/X        fault impedance [pu]
+    status                text (MCOS)
+    (other engineered fault features: criticalityIndex, localLoadLevel,
+     localVoltage, globalLoadMean, globalVoltageMean, globalVoltageStd,
+     generatorElectricalDistance - some are 0 placeholders)
+
+powerFlow/   pre-fault operating point (steady-state power-flow solution)
+    Pg  (1, 3)  generator active power  [MW]
+    Qg  (1, 3)  generator reactive power [MVAr]
+    Pd  (1, 9)  bus active load  [MW]
+    Qd  (1, 9)  bus reactive load [MVAr]
+    V   (1, 9)  bus voltage magnitude [pu]
+    theta (1,9) bus voltage angle [rad]
+
+mpc/         MATPOWER case describing the network for this scenario
+    baseMVA   scalar (= 100)
+    bus       (13, 9)   MATPOWER bus matrix (transposed)
+    branch    (13, 9)   MATPOWER branch matrix (transposed)
+    gen       (21, 3)   MATPOWER gen matrix (transposed). Useful rows
+                        (0-indexed): 3 = Qmax, 4 = Qmin, 8 = Pmax, 9 = Pmin
+    gencost   (7, 3)    generator cost data
+    switched_load, version
+
+scenario/    how this operating point was generated
+    loadVariation, generationVariation, areaScaling/loadFactor,
+    areaScaling/generationFactor, totalLoad, totalLoad0, totalGeneration,
+    totalGeneration0, randomSeed, id
+
+validation/  operating-point screening result
+    converged             scalar  1 if power flow converged
+    minVoltage, maxVoltage        [pu]
+    powerBalanceError             [MW]
+    lineLoadingMax                (0 placeholder here)
+    reactiveLimitViolation/global
+    status, reason                text (MCOS)
+
+indices/     engineered scenario-level features (inertia, kineticEnergy,
+             lossRatio, stress, voltageMargin, voltageStats, loadDiversityP/Q,
+             networkDensity, numberBuses/Branches/Generators, ...). Some are
+             zero placeholders for this case configuration.
+
+graph/       graph representation of the network (nodes, edges, edgeIndex
+             (18, 2), edgeMap, metadata). 18 directed edges = 9 branches x 2.
+
+--------------------------------------------------------------------------------
+7. STABILITY LABEL - READ THIS BEFORE USING LABELS
+--------------------------------------------------------------------------------
+The AUTHORITATIVE binary stability label is the NUMERIC field:
+
+        transient.label.value      (1 = UNSTABLE, 0 = STABLE)
+
+A scenario is UNSTABLE when the peak inter-machine angle separation
+(transient.label.maxSeparation, in degrees) exceeds transient.label.threshold,
+which equals 180 degrees for every scenario. This numeric field is fully
+readable in Python and reproduces /dataset/statistics/stable = 9762 exactly.
+
+Do NOT infer the label from the sign of transient.tsi. Using tsi > 0 gives
+9,792 "stable" - 30 scenarios more than the authoritative label. Those 30
+scenarios have a peak separation of ~183 degrees: unstable under the 180-degree
+criterion but classified stable by a naive tsi > 0 (equivalent 360-degree) test.
+Always use transient.label.value.
+
+--------------------------------------------------------------------------------
+8. IMPORTANT DATA CAVEATS
+--------------------------------------------------------------------------------
+* delta is stored in RADIANS and is ABSOLUTE: it contains the common
+  synchronous ramp shared by all machines, so raw max(delta)-min(delta) over a
+  whole trajectory is meaningless. For physically meaningful inter-machine
+  separation, subtract the per-time-step generator mean (the centre of inertia)
+  and convert to degrees:
+        coi = delta.mean(axis=0)                 # per time step
+        separation_deg = (delta - coi) * 180/pi
+  The pre-computed transient.indices.maxAngleSeparationDeg already gives the
+  peak of this quantity.
+
+* omega is per-unit with nominal value 1.0; use |omega - 1| for deviation.
+
+* time2LossSync is measured relative to the FAULT-CLEARING instant, not the
+  fault start. A negative value means synchronism was lost before clearing.
+
+* Text (MCOS) fields cannot be read outside MATLAB. Every one has a numeric
+  equivalent: use transient.label.value instead of transient.label.status,
+  fault.line/fault.bus instead of fault.type text, etc.
+
+* Some engineered feature fields are 0 placeholders for this case configuration
+  (e.g. fault.criticalityIndex, line-loading/line-stress indices,
+  validation.lineLoadingMax). Verify a field is populated before relying on it.
+
+--------------------------------------------------------------------------------
+9. PROVIDED TOOLS
+--------------------------------------------------------------------------------
+Requirements: Python 3.9+, numpy, h5py (matplotlib optional for plotting).
+
+Export a clean, flat, portable HDF5 file (all 20,000 scenarios):
+    python convert_mat_to_hdf5.py case_IEEE9BusSystem_dataset.mat -o clean.h5
+
+Quick test on the first 200 scenarios:
+    python convert_mat_to_hdf5.py case_IEEE9BusSystem_dataset.mat -o test.h5 --limit 200
+
+The clean file organizes the data as:
+    /                (attrs: case_name, n_samples, n_generators, n_buses, n_time)
+    /metadata        dataset rates
+    /statistics      dataset counts
+    /scalars/<name>  every per-scenario scalar as an (N,) array,
+                     plus /scalars/stable (1 = stable, 0 = unstable)
+    /trajectories/delta   (N, n_gen, n_time)  [rad, absolute]
+    /trajectories/omega   (N, n_gen, n_time)  [pu]
+    /trajectories/time    (n_time,)           [s]
+    /powerflow/{Pg,Qg,Pd,Qd,V,theta}          (N, ...)
+    /generator_limits/{Pmax,Pmin,Qmax,Qmin}   (N, n_gen)
+
+Explore the raw .mat or the clean .h5 and print a summary:
+    python explore_dataset.py case_IEEE9BusSystem_dataset.mat
+    python explore_dataset.py clean.h5
+    python explore_dataset.py clean.h5 --plot 0     # plot scenario 0
+
+--------------------------------------------------------------------------------
+10. CITATION
+--------------------------------------------------------------------------------
+If you use this dataset, please cite:
+
+    @dataset{Supreme2026IEEEDataPort,
+  author       = {Hussein Suprême and Martin de Montigny and Arnaud Zinflou},
+  title        = {A 20,000-Scenario Graph Dataset with Full Generator Trajectories for Transient Stability Assessment of the IEEE 9-Bus System},
+  year         = {2026},
+  publisher    = {IEEE DataPort},
+  doi          = {10.21227/d10j-5b27},
+  url          = {https://dx.doi.org/10.21227/d10j-5b27}
+}
+
+================================================================================
