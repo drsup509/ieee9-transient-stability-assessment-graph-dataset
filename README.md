@@ -3,8 +3,9 @@
 MATLAB pipeline database_creator/ that generates labelled transient-stability-assessment (TSA)
 scenarios for the **IEEE 9-bus system**. 
 
+data_explorer/ to explore the results. A README.md is avalaible in the folder.
 
-For each scenario it:
+For each scenario, the MATLAB pipeline :
 
 1. builds a randomized operating point (correlated load + generation scaling),
 2. solves the steady-state power flow with **MATPOWER**,
