@@ -1,6 +1,6 @@
 # IEEE 9-Bus Transient Stability Scenario / Dataset Generator
 
-MATLAB pipeline /database_creator that generates labelled transient-stability-assessment (TSA)
+MATLAB pipeline database_creator/ that generates labelled transient-stability-assessment (TSA)
 scenarios for the **IEEE 9-bus system**. 
 
 
